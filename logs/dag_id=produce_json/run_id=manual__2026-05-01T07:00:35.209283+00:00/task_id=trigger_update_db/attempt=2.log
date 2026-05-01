@@ -1,0 +1,5 @@
+[2026-05-01T07:00:48.963+0000] {task_command.py:426} INFO - Running <TaskInstance: produce_json.trigger_update_db manual__2026-05-01T07:00:35.209283+00:00 [success]> on host cbcf75db513e
+[2026-05-01T07:00:49.010+0000] {taskinstance.py:2648} INFO - Exporting env vars: AIRFLOW_CTX_DAG_EMAIL='data@engineers.com' AIRFLOW_CTX_DAG_OWNER='dataengineers' AIRFLOW_CTX_DAG_ID='produce_json' AIRFLOW_CTX_TASK_ID='trigger_update_db' AIRFLOW_CTX_EXECUTION_DATE='2026-05-01T07:00:35.209283+00:00' AIRFLOW_CTX_TRY_NUMBER='2' AIRFLOW_CTX_DAG_RUN_ID='manual__2026-05-01T07:00:35.209283+00:00'
+[2026-05-01T07:00:49.011+0000] {taskinstance.py:430} INFO - ::endgroup::
+[2026-05-01T07:00:50.030+0000] {taskinstance.py:441} INFO - ::group::Post task execution logs
+[2026-05-01T07:00:50.035+0000] {taskinstance.py:1206} INFO - Marking task as SUCCESS. dag_id=produce_json, task_id=trigger_update_db, run_id=manual__2026-05-01T07:00:35.209283+00:00, execution_date=20260501T070035, start_date=20260501T070048, end_date=20260501T070050
