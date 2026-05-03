@@ -1,70 +1,86 @@
-from airflow.providers.postgres.hooks.postgres import PostgresHook
-from psycopg2.extras import RealDictCursor
+import os
 
-table="yt_api"
-
-def get_conn_cursor():
-    hook=PostgresHook(postgres_conn_id="postgres_db_yt_elt",database='elt_db') #postgres_db_yt_elt yaml定义，elt_db为env里定义的
-    conn =hook.get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor) #hook  → Airflow 的数据库连接工具
-    return conn, cur                                 # conn  → 真正连上 PostgreSQL 的连接对象
-                                                     #cur   → 用来执行 SQL 这里RealDictCursor让 cursor 查询出来的结果变成“字典格式”。
-    # cur.execute("SELECT * FROM table")
-
-def close_conn_cursor(conn,cur):
-    cur.close()
-    conn.close()
-
-def create_schema(schema):
-    conn,cur=get_conn_cursor()
-    schema_sql=f"CREATE SCHEMA IF NOT EXISTS {schema};"
-
-    cur.execute(schema_sql)
-    conn.commit()
-    close_conn_cursor(conn,cur)
+from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+from google.cloud import bigquery
 
 
-def create_table(schema):
+TABLE = "yt_api"
+DAILY_METRICS_TABLE = "yt_video_daily_metrics"
+GCP_CONN_ID = os.getenv("GCP_CONN_ID", "google_cloud_default")
+BIGQUERY_PROJECT_ID = os.getenv("BIGQUERY_PROJECT_ID") or os.getenv("GCP_PROJECT")
+BIGQUERY_LOCATION = os.getenv("BIGQUERY_LOCATION", "US")
 
-    conn, cur = get_conn_cursor()
 
+def get_bigquery_client():
+    hook = BigQueryHook(gcp_conn_id=GCP_CONN_ID, location=BIGQUERY_LOCATION)
+    return hook.get_client(project_id=BIGQUERY_PROJECT_ID, location=BIGQUERY_LOCATION)
+
+
+def get_project_id(client):
+    if BIGQUERY_PROJECT_ID:
+        return BIGQUERY_PROJECT_ID
+    if client.project:
+        return client.project
+    raise ValueError("Set BIGQUERY_PROJECT_ID or GCP_PROJECT for BigQuery tasks.")
+
+
+def table_ref(client, dataset, table=TABLE):
+    return f"`{get_project_id(client)}.{dataset}.{table}`"
+
+
+def create_schema(client, schema):
+    dataset_id = f"{get_project_id(client)}.{schema}"
+    dataset = bigquery.Dataset(dataset_id)
+    dataset.location = BIGQUERY_LOCATION
+    client.create_dataset(dataset, exists_ok=True)
+
+
+def create_table(client, schema):
     if schema == "staging":
         table_sql = f"""
-                CREATE TABLE IF NOT EXISTS {schema}.{table} (
-                    "Video_ID" VARCHAR(11) PRIMARY KEY NOT NULL,
-                    "Video_Title" TEXT NOT NULL,
-                    "Upload_Date" TIMESTAMP NOT NULL,
-                    "Duration" VARCHAR(20) NOT NULL,
-                    "Video_Views" INT,
-                    "Likes_Count" INT,
-                    "Comments_Count" INT   
-                );
-            """
+        CREATE TABLE IF NOT EXISTS {table_ref(client, schema)} (
+            Video_ID STRING NOT NULL,
+            Video_Title STRING NOT NULL,
+            Upload_Date TIMESTAMP NOT NULL,
+            Duration STRING NOT NULL,
+            Video_Views INT64,
+            Likes_Count INT64,
+            Comments_Count INT64
+        )
+        """
     else:
         table_sql = f"""
-                  CREATE TABLE IF NOT EXISTS {schema}.{table} (
-                      "Video_ID" VARCHAR(11) PRIMARY KEY NOT NULL,
-                      "Video_Title" TEXT NOT NULL,
-                      "Upload_Date" TIMESTAMP NOT NULL,
-                      "Duration" TIME NOT NULL,
-                      "Video_Type" VARCHAR(10) NOT NULL,
-                      "Video_Views" INT,
-                      "Likes_Count" INT,
-                      "Comments_Count" INT    
-                  ); 
-              """
+        CREATE TABLE IF NOT EXISTS {table_ref(client, schema)} (
+            Video_ID STRING NOT NULL,
+            Video_Title STRING NOT NULL,
+            Upload_Date TIMESTAMP NOT NULL,
+            Duration TIME NOT NULL,
+            Video_Type STRING NOT NULL,
+            Video_Views INT64,
+            Likes_Count INT64,
+            Comments_Count INT64
+        )
+        """
 
-    cur.execute(table_sql)
-    conn.commit()
-    close_conn_cursor(conn, cur)
+    client.query(table_sql).result()
 
-def get_video_ids(cur, schema):
-    cur.execute(f"""SELECT "Video_ID" FROM {schema}.{table};""")
-    ids = cur.fetchall()
-    video_ids = [row["Video_ID"] for row in ids]
-    return video_ids
+    if schema == "core":
+        daily_metrics_sql = f"""
+        CREATE TABLE IF NOT EXISTS {table_ref(client, schema, DAILY_METRICS_TABLE)} (
+            Video_ID STRING NOT NULL,
+            Snapshot_Date DATE NOT NULL,
+            Video_Title STRING NOT NULL,
+            Upload_Date TIMESTAMP NOT NULL,
+            Duration TIME NOT NULL,
+            Video_Type STRING NOT NULL,
+            Video_Views INT64,
+            Likes_Count INT64,
+            Comments_Count INT64
+        )
+        """
+        client.query(daily_metrics_sql).result()
 
- 
 
-
-
+def get_video_ids(client, schema):
+    rows = client.query(f"SELECT Video_ID FROM {table_ref(client, schema)}").result()
+    return [row.Video_ID for row in rows]

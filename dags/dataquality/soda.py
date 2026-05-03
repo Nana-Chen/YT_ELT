@@ -4,7 +4,7 @@ from airflow.operators.bash import BashOperator
 logger = logging.getLogger(__name__)
 
 SODA_PATH = "/opt/airflow/include/soda"
-DATASOURCE = "pg_datasource"
+DATASOURCE = "bigquery_datasource"
 
 
 def yt_elt_data_quality(schema):

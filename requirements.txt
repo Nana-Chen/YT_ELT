@@ -1,2 +1,5 @@
-soda-core-postgres==3.3.14
+apache-airflow-providers-google==10.22.0
+python-dotenv==1.0.1
+requests==2.32.3
+soda-core-bigquery==3.5.6
 pytest==8.3.3

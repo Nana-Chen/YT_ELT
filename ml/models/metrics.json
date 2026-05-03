@@ -1,0 +1,15 @@
+{
+  "run_id": "20260503T121827Z",
+  "trained_at": "2026-05-03T12:18:27.272574+00:00",
+  "model_name": "video_performance_views",
+  "training_rows": 971,
+  "features": [
+    "duration_seconds",
+    "video_age_days",
+    "likes_count",
+    "comments_count",
+    "is_short"
+  ],
+  "mae": 30143227.66641532,
+  "r2": 0.8635568869351216
+}

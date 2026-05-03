@@ -1,18 +1,16 @@
 def test_api_key(api_key):
-    assert api_key == "MOCK_KEY1234"
+    assert api_key == "test_api_key"
 
 
 def test_channel_handle(channel_handle):
-    assert channel_handle == "MRCHEESE"
+    assert channel_handle == "brand_channel"
 
 
-def test_postgres_conn(mock_postgres_conn_vars):
-    conn = mock_postgres_conn_vars
-    assert conn.login == "mock_username"
-    assert conn.password == "mock_password"
-    assert conn.host == "mock_host"
-    assert conn.port == 1234
-    assert conn.schema == "mock_db_name"
+def test_bigquery_conn(mock_bigquery_conn_vars):
+    conn = mock_bigquery_conn_vars
+    assert conn.conn_id == "google_cloud_default"
+    assert conn.conn_type == "google_cloud_platform"
+    assert conn.extra_dejson["extra__google_cloud_platform__project"] == "video-analytics-prod"
 
 
 def test_dags_integrity(dagbag):

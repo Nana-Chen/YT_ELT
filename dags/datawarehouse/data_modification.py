@@ -1,92 +1,188 @@
 import logging
+from datetime import date
+
+from google.cloud import bigquery
+
+from datawarehouse.data_utils import table_ref
+
 
 logger = logging.getLogger(__name__)
-table = "yt_api"
 
 
-def insert_rows(cur, conn, schema, row):
+def _int_or_none(value):
+    return int(value) if value is not None else None
 
-    try:
-        if schema == "staging":
-            video_id = "video_id"
-            cur.execute(
-                f"""
-                INSERT INTO {schema}.{table}("Video_ID", "Video_Title", "Upload_Date", "Duration", "Video_Views", "Likes_Count", "Comments_Count")
-                VALUES (%(video_id)s, %(title)s, %(publishedAt)s, %(duration)s, %(viewCount)s, %(likeCount)s, %(commentCount)s);
-                """,
-                row,
-            )
-        else:
-            video_id = "Video_ID"
 
-            cur.execute(
-                f"""
-                INSERT INTO {schema}.{table}("Video_ID", "Video_Title", "Upload_Date", "Duration", "Video_Type", "Video_Views", "Likes_Count", "Comments_Count")
-                VALUES (%(Video_ID)s, %(Video_Title)s, %(Upload_Date)s, %(Duration)s, %(Video_Type)s, %(Video_Views)s, %(Likes_Count)s, %(Comments_Count)s)
-                """,
-                row,
-            )
+def _query(client, sql, params=None):
+    job_config = bigquery.QueryJobConfig(query_parameters=params or [])
+    return client.query(sql, job_config=job_config).result()
 
-        conn.commit()
-        logger.info(f"Inserted row with Video_ID: {row[video_id]}")
 
-    except Exception as e:
-        logger.error(f"Error inserting row with Video_ID: {row[video_id]}")
-        raise e
-    
-def update_rows(cur, conn, schema, row):
-    try:
-        # staging
-        if schema == "staging":
-            video_id = "video_id"
-            upload_date = "publishedAt"
-            video_title = "title"
-            video_views = "viewCount"
-            likes_count = "likeCount"
-            comments_count = "commentCount"
-        # core
-        else:
-            video_id = "Video_ID"
-            upload_date = "Upload_Date"
-            video_title = "Video_Title"
-            video_views = "Video_Views"
-            likes_count = "Likes_Count"
-            comments_count = "Comments_Count"
+def _staging_params(row):
+    return [
+        bigquery.ScalarQueryParameter("Video_ID", "STRING", row["video_id"]),
+        bigquery.ScalarQueryParameter("Video_Title", "STRING", row["title"]),
+        bigquery.ScalarQueryParameter("Upload_Date", "TIMESTAMP", row["publishedAt"]),
+        bigquery.ScalarQueryParameter("Duration", "STRING", row["duration"]),
+        bigquery.ScalarQueryParameter("Video_Views", "INT64", _int_or_none(row["viewCount"])),
+        bigquery.ScalarQueryParameter("Likes_Count", "INT64", _int_or_none(row["likeCount"])),
+        bigquery.ScalarQueryParameter(
+            "Comments_Count", "INT64", _int_or_none(row["commentCount"])
+        ),
+    ]
 
-        cur.execute(
-            f"""
-            UPDATE {schema}.{table}
-            SET "Video_Title" = %({video_title})s,
-                "Video_Views" = %({video_views})s, 
-                "Likes_Count" = %({likes_count})s, 
-                "Comments_Count" = %({comments_count})s
-            WHERE "Video_ID" = %({video_id})s AND "Upload_Date" = %({upload_date})s;
-            """,
-            row,
+
+def _core_params(row):
+    return [
+        bigquery.ScalarQueryParameter("Video_ID", "STRING", row["Video_ID"]),
+        bigquery.ScalarQueryParameter("Video_Title", "STRING", row["Video_Title"]),
+        bigquery.ScalarQueryParameter("Upload_Date", "TIMESTAMP", row["Upload_Date"]),
+        bigquery.ScalarQueryParameter("Duration", "TIME", row["Duration"]),
+        bigquery.ScalarQueryParameter("Video_Type", "STRING", row["Video_Type"]),
+        bigquery.ScalarQueryParameter("Video_Views", "INT64", _int_or_none(row["Video_Views"])),
+        bigquery.ScalarQueryParameter("Likes_Count", "INT64", _int_or_none(row["Likes_Count"])),
+        bigquery.ScalarQueryParameter(
+            "Comments_Count", "INT64", _int_or_none(row["Comments_Count"])
+        ),
+    ]
+
+
+def upsert_row(client, schema, row):
+    if schema == "staging":
+        video_id = row["video_id"]
+        params = _staging_params(row)
+    else:
+        video_id = row["Video_ID"]
+        params = _core_params(row)
+
+    sql = f"""
+    MERGE {table_ref(client, schema)} AS target
+    USING (
+        SELECT
+            @Video_ID AS Video_ID,
+            @Video_Title AS Video_Title,
+            @Upload_Date AS Upload_Date,
+            @Duration AS Duration,
+            {"@Video_Type AS Video_Type," if schema != "staging" else ""}
+            @Video_Views AS Video_Views,
+            @Likes_Count AS Likes_Count,
+            @Comments_Count AS Comments_Count
+    ) AS source
+    ON target.Video_ID = source.Video_ID
+    WHEN MATCHED THEN
+        UPDATE SET
+            Video_Title = source.Video_Title,
+            Upload_Date = source.Upload_Date,
+            Duration = source.Duration,
+            {"Video_Type = source.Video_Type," if schema != "staging" else ""}
+            Video_Views = source.Video_Views,
+            Likes_Count = source.Likes_Count,
+            Comments_Count = source.Comments_Count
+    WHEN NOT MATCHED THEN
+        INSERT (
+            Video_ID,
+            Video_Title,
+            Upload_Date,
+            Duration,
+            {"Video_Type," if schema != "staging" else ""}
+            Video_Views,
+            Likes_Count,
+            Comments_Count
         )
-
-        conn.commit()
-        logger.info(f"Updated row with Video_ID: {row[video_id]}")
-
-    except Exception as e:
-        logger.error(f"Error updating row with Video_ID: {row[video_id]} - {e}")
-        raise e
-    
-
-def delete_rows(cur, conn, schema, ids_to_delete):
-    try:
-        ids_to_delete = f"""({', '.join(f"'{id}'" for id in ids_to_delete)})"""
-        cur.execute(
-            f"""
-            DELETE FROM {schema}.{table}
-            WHERE "Video_ID" IN {ids_to_delete};
-            """
+        VALUES (
+            source.Video_ID,
+            source.Video_Title,
+            source.Upload_Date,
+            source.Duration,
+            {"source.Video_Type," if schema != "staging" else ""}
+            source.Video_Views,
+            source.Likes_Count,
+            source.Comments_Count
         )
-        conn.commit()
-        logger.info(f"Deleted rows with Video_IDs: {ids_to_delete}")
+    """
+    _query(client, sql, params)
+    logger.info("Upserted row with Video_ID: %s", video_id)
 
-    except Exception as e:
-        logger.error(f"Error deleting rows with Video_IDs: {ids_to_delete} - {e}")
-        raise e
-    
 
+def insert_rows(client, schema, row):
+    upsert_row(client, schema, row)
+
+
+def update_rows(client, schema, row):
+    upsert_row(client, schema, row)
+
+
+def delete_rows(client, schema, ids_to_delete):
+    params = [
+        bigquery.ArrayQueryParameter("video_ids", "STRING", list(ids_to_delete)),
+    ]
+    _query(
+        client,
+        f"""
+        DELETE FROM {table_ref(client, schema)}
+        WHERE Video_ID IN UNNEST(@video_ids)
+        """,
+        params,
+    )
+    logger.info("Deleted rows with Video_IDs: %s", ids_to_delete)
+
+
+def upsert_daily_metric(client, row, snapshot_date=None):
+    snapshot_date = snapshot_date or date.today()
+    params = _core_params(row)
+    params.append(bigquery.ScalarQueryParameter("Snapshot_Date", "DATE", snapshot_date))
+
+    _query(
+        client,
+        f"""
+        MERGE {table_ref(client, "core", "yt_video_daily_metrics")} AS target
+        USING (
+            SELECT
+                @Video_ID AS Video_ID,
+                @Snapshot_Date AS Snapshot_Date,
+                @Video_Title AS Video_Title,
+                @Upload_Date AS Upload_Date,
+                @Duration AS Duration,
+                @Video_Type AS Video_Type,
+                @Video_Views AS Video_Views,
+                @Likes_Count AS Likes_Count,
+                @Comments_Count AS Comments_Count
+        ) AS source
+        ON target.Video_ID = source.Video_ID
+            AND target.Snapshot_Date = source.Snapshot_Date
+        WHEN MATCHED THEN
+            UPDATE SET
+                Video_Title = source.Video_Title,
+                Upload_Date = source.Upload_Date,
+                Duration = source.Duration,
+                Video_Type = source.Video_Type,
+                Video_Views = source.Video_Views,
+                Likes_Count = source.Likes_Count,
+                Comments_Count = source.Comments_Count
+        WHEN NOT MATCHED THEN
+            INSERT (
+                Video_ID,
+                Snapshot_Date,
+                Video_Title,
+                Upload_Date,
+                Duration,
+                Video_Type,
+                Video_Views,
+                Likes_Count,
+                Comments_Count
+            )
+            VALUES (
+                source.Video_ID,
+                source.Snapshot_Date,
+                source.Video_Title,
+                source.Upload_Date,
+                source.Duration,
+                source.Video_Type,
+                source.Video_Views,
+                source.Likes_Count,
+                source.Comments_Count
+            )
+        """,
+        params,
+    )
+    logger.info("Upserted daily metric for Video_ID: %s", row["Video_ID"])

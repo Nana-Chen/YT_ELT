@@ -1,25 +1,35 @@
-import requests
 import json
-from datetime import date
-from airflow.models import Variable
 import os
+from datetime import date
+from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
 
+from airflow.models import Variable
 from airflow.decorators import task
 
 load_dotenv(dotenv_path="./.env")
 
 
-API_KEY=os.getenv("API_KEY") #从env文件拿到
-CHANNEL_HANDLE=Variable.get("CHANNEL_HANDLE")
-maxResults = 50
+MAX_RESULTS = 50
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+def _get_required_config(name):
+    value = os.getenv(name) or Variable.get(name, default_var=None)
+    if not value:
+        raise ValueError(f"Missing required configuration: {name}")
+    return value
 
 @task
 def get_playlist_id():
     try:
-        url=f"https://youtube.googleapis.com/youtube/v3/channels?part=contentDetails&forHandle={CHANNEL_HANDLE}&key={API_KEY}"
+        api_key = _get_required_config("API_KEY")
+        channel_handle = _get_required_config("CHANNEL_HANDLE")
+        url=f"https://youtube.googleapis.com/youtube/v3/channels?part=contentDetails&forHandle={channel_handle}&key={api_key}"
 
-        response= requests.get(url)
+        response= requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
 
         # print(response)
         response.raise_for_status()
@@ -43,6 +53,7 @@ def get_video_ids(playlistId):
     video_ids = []
     pageToken = None
     base_url = "https://youtube.googleapis.com/youtube/v3/playlistItems"
+    api_key = _get_required_config("API_KEY")
     
 
     try:
@@ -50,8 +61,8 @@ def get_video_ids(playlistId):
             params = {
                 "part": "contentDetails",
                 "playlistId": playlistId,
-                "maxResults": maxResults,
-                "key": API_KEY
+                "maxResults": MAX_RESULTS,
+                "key": api_key
             }
 
 
@@ -60,7 +71,7 @@ def get_video_ids(playlistId):
             if pageToken:
                 params["pageToken"] = pageToken
 
-            response = requests.get(base_url, params=params)
+            response = requests.get(base_url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
             data = response.json()
 
@@ -87,18 +98,19 @@ def batch_list(video_id_lst,batch_size):
 @task
 def extract_video_data(video_ids):
     extracted_data = []
+    api_key = _get_required_config("API_KEY")
 
     def batch_list(video_id_lst,batch_size):
         for video_id in range(0,len(video_id_lst),batch_size):
             yield video_id_lst[video_id:video_id+batch_size]
   
     try:
-        for batch in batch_list(video_ids,maxResults):
+        for batch in batch_list(video_ids,MAX_RESULTS):
             video_ids_str =','.join(batch)
 
-            base_url=f"https://youtube.googleapis.com/youtube/v3/videos?part=contentDetails&part=snippet&part=statistics&id={video_ids_str}&key={API_KEY}"
+            base_url=f"https://youtube.googleapis.com/youtube/v3/videos?part=contentDetails&part=snippet&part=statistics&id={video_ids_str}&key={api_key}"
 
-            response = requests.get(base_url)
+            response = requests.get(base_url, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
             data = response.json()
 
@@ -126,10 +138,12 @@ def extract_video_data(video_ids):
 
 @task
 def save_to_json(extracted_data):
-    file_path =f"./data/YT_data_{date.today()}.json"
+    file_path = Path(f"./data/YT_data_{date.today()}.json")
+    file_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(file_path,"w",encoding="utf_8") as json_outfile:
         json.dump(extracted_data,json_outfile,indent=4,ensure_ascii=False)
+    return str(file_path)
 
 
 if __name__ == "__main__":
@@ -140,4 +154,3 @@ if __name__ == "__main__":
     print(extract_video_data(video_ids))
     # video_data = extract_video_data(video_ids)
     # save_to_json(video_data)
-

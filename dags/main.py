@@ -18,11 +18,11 @@ local_tz = pendulum.timezone("Europe/Malta")
 
 # Default Args
 default_args = {
-    "owner": "dataengineers",
+    "owner": "analytics-platform",
     "depends_on_past": False,
     "email_on_failure": False,
     "email_on_retry": False,
-    "email": "data@engineers.com",
+    "email": "analytics-ops@example.com",
     # 'retries': 1,
     # 'retry_delay': timedelta(minutes=5),
     "max_active_runs": 1,
@@ -53,6 +53,7 @@ with DAG(
     trigger_update_db = TriggerDagRunOperator(
         task_id="trigger_update_db",
         trigger_dag_id="update_db",
+        conf={"json_file_path": "{{ ti.xcom_pull(task_ids='save_to_json') }}"},
     )
 
     # Define dependencies

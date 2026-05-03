@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pandas==2.2.3
+scikit-learn==1.6.1
+joblib==1.4.2
+google-cloud-bigquery==3.29.0
+db-dtypes==1.4.1

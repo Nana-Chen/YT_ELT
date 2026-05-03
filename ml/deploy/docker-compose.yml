@@ -1,0 +1,15 @@
+services:
+  youtube-views-model:
+    build:
+      context: ../..
+      dockerfile: ml/Dockerfile
+    environment:
+      MODEL_PATH: /app/ml/models/video_views_model.joblib
+      METRICS_PATH: /app/ml/models/metrics.json
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
